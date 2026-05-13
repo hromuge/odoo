@@ -100,7 +100,7 @@ class AccountTax(models.Model):
                "See '_search_name' and '_parse_name_search' for why this is not possible with 'filter_domain'.")
     type_tax_use = fields.Selection(TYPE_TAX_USE, string='Tax Type', required=True, default="sale", tracking=True,
         help="Determines where the tax is selectable. Note: 'None' means a tax can't be used by itself, however it can still be used in a group. 'adjustment' is used to perform tax adjustment.")
-    tax_scope = fields.Selection([('service', 'Services'), ('consu', 'Goods')], string="Tax Scope", help="Restrict the use of taxes to a type of product.")
+    tax_scope = fields.Selection([('service', 'Services'), ('consu', 'Goods')], string="Tax Scope")
     amount_type = fields.Selection(default='percent', string="Tax Computation", required=True, tracking=True,
         selection=[('group', 'Group of Taxes'), ('fixed', 'Fixed'), ('percent', 'Percentage'), ('division', 'Percentage Tax Included')],
         help="""
@@ -4397,7 +4397,7 @@ class AccountTax(models.Model):
 
     @api.model
     def _import_retrieve_tax(self, search_plan, company, tax_values_list):
-        cache = {}
+        cache = self.env.cr.cache.setdefault('retrieved_tax_map', {}).setdefault(company.id, {})
 
         static_domain = expression.OR([
             [*self._check_company_domain(company), ('company_id', '!=', False)],
@@ -4408,6 +4408,7 @@ class AccountTax(models.Model):
                ('amount_type', '=', tax_values['amount_type']),
                ('type_tax_use', '=', tax_values['type_tax_use']),
                ('amount', '=', tax_values['amount']),
+               *([('country_id', '=', tax_values['invoice_predictive']['invoice'].tax_country_id.id)] if 'invoice_predictive' in tax_values else []),
             ]
             orders = ['sequence', 'id']
             if name := tax_values.get('name'):
@@ -4437,7 +4438,7 @@ class AccountTax(models.Model):
                         cache_key = criteria.get('cache_key')
 
                     # Look at the cache if the value has already been tested with this key.
-                    if cache_key in cache:
+                    if cache_key and cache_key in cache:
                         if tax := cache[cache_key]:
                             tax_values['tax'] = tax
                             break
@@ -4453,9 +4454,9 @@ class AccountTax(models.Model):
                             'static_domain': expression.AND([tax_domain, static_domain]),
                         })
 
+                    if cache_key:
+                        cache[cache_key] = tax
                     if tax:
-                        if cache_key:
-                            cache[cache_key] = tax
                         tax_values['tax'] = tax
                         break
 
